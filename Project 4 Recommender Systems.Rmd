@@ -1,0 +1,404 @@
+---
+title: "Project 4 Recommender Systems"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    theme: readable
+    toc: yes
+    toc_float: yes
+date: "12/05/2020"
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+Load the required libraries
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(recommenderlab)
+library(DT)
+library(data.table)
+library(reshape2)
+library(Matrix)
+library(knitr)
+```
+
+
+
+## ratings data
+
+Loading the ratings dataset. In this dataset, we have 1,000,209 anonymous ratings of about 3706 unique movies made by 6040 users.
+
+```{r}
+# data should be available locally
+#myurl = "https://liangfgithub.github.io/MovieData/"
+
+# url for images from professor Liang's github repository
+small_image_url = "https://liangfgithub.github.io/MovieImages/"
+
+# use colClasses = 'NULL' to skip columns
+ratings = read.csv('ratings.dat', 
+                   sep = ':',
+                   colClasses = c('integer', 'NULL'), 
+                   header = FALSE)
+colnames(ratings) = c('UserID', 'MovieID', 'Rating', 'Timestamp')
+```
+
+Displaying the first 6 records of the ratings dataset:
+
+```{r, result='asis'}
+datatable(head(ratings, 6), 
+          class = "nowrap hover row-border", 
+          options = list(dom = 't',
+                         scrollX = FALSE, 
+                         autoWidth = TRUE))
+```
+
+## movies data
+
+
+Loading the Movies dataset which includes records of about 3706 unique movies.
+
+
+```{r}
+movies = readLines('movies.dat')
+movies = strsplit(movies, split = "::", fixed = TRUE, useBytes = TRUE)
+movies = matrix(unlist(movies), ncol = 3, byrow = TRUE)
+movies = data.frame(movies, stringsAsFactors = FALSE)
+colnames(movies) = c('MovieID', 'Title', 'Genres')
+movies$MovieID = as.integer(movies$MovieID)
+
+# convert accented characters
+movies$Title[73]
+movies$Title = iconv(movies$Title, "latin1", "UTF-8")
+movies$Title[73]
+
+# extract year
+movies$Year = as.numeric(unlist(
+  lapply(movies$Title, function(x) substr(x, nchar(x)-4, nchar(x)-1))))
+```
+
+Displaying the first 6 records of Movies dataset:
+
+```{r, result='asis'}
+datatable(head(movies, 6), 
+          class = "nowrap hover row-border", 
+          options = list(dom = 't',
+                         scrollX = FALSE, 
+                         autoWidth = TRUE))
+```
+
+## user data
+
+Loading the user dataset which includes records of about 6040 users.
+
+```{r}
+users = read.csv('users.dat',
+                 sep = ':', header = FALSE)
+users = users[, -c(2,4,6,8)] # skip columns
+colnames(users) = c('UserID', 'Gender', 'Age', 'Occupation', 'Zip-code')
+```
+
+displaying the first 6 records of users dataset:
+
+```{r, result='asis'}
+datatable(head(users, 6), 
+          class = "nowrap hover row-border", 
+          options = list(dom = 't',
+                         scrollX = FALSE, 
+                         autoWidth = TRUE))
+```
+
+For users, `Gender` is denoted by "M" for male and "F" for female, `Age` is chosen from the following ranges:
+
+	*  1:  "Under 18"
+	* 18:  "18-24"
+	* 25:  "25-34"
+	* 35:  "35-44"
+	* 45:  "45-49"
+	* 50:  "50-55"
+	* 56:  "56+"
+
+and `Occupation` is chosen from the following choices:
+
+	*  0:  "other" or not specified
+	*  1:  "academic/educator"
+	*  2:  "artist"
+	*  3:  "clerical/admin"
+	*  4:  "college/grad student"
+	*  5:  "customer service"
+	*  6:  "doctor/health care"
+	*  7:  "executive/managerial"
+	*  8:  "farmer"
+	*  9:  "homemaker"
+	* 10:  "K-12 student"
+	* 11:  "lawyer"
+	* 12:  "programmer"
+	* 13:  "retired"
+	* 14:  "sales/marketing"
+	* 15:  "scientist"
+	* 16:  "self-employed"
+	* 17:  "technician/engineer"
+	* 18:  "tradesman/craftsman"
+	* 19:  "unemployed"
+	* 20:  "writer"
+
+## Ratings per Movie
+
+Throughout, **popular** means receiving many ratings; a popular movie may not be a **highly-rated** movie. More specific definitions are provided in proposed recommendation schemes for System I section below. 
+
+
+A list of genres for movies is outlined below. In the App, the user is going to select the genre he/she prefers from a drop-down menu, and the list of recommendations will be shown accordingly.
+
+For the purpose of demonstrating results in this document, we are going to hard code the desired genre from the list below to be `Comedy` 
+
+```{r}
+genre_list = c("Action", "Adventure", "Animation", 
+               "Children's", "Comedy", "Crime",
+               "Documentary", "Drama", "Fantasy",
+               "Film-Noir", "Horror", "Musical", 
+               "Mystery", "Romance", "Sci-Fi", 
+               "Thriller", "War", "Western")
+desired_genre = genre_list[5]
+```
+
+## System I
+
+### Proposed Recommendation Scheme Based on Genre I
+
+Definition: This recommendation scheme simply picks the top 10 movies based on number of ratings per movie for movies that have received more than 2000 ratings. So, in this scheme we pick the most popular movies that have been rated the most (regardless of the actual values of ratings) by users in this dataset.
+
+Note: Genre is hard-coded to `Comedy`. However, in our Movie Recommender App, the user is allowed to pick his desired genre. Shown below is a list of recommendations for `Comedy` genre.
+
+```{r}
+ratings %>% 
+  group_by(MovieID) %>% 
+  summarize(ratings_per_movie = n(), ave_ratings = mean(Rating)) %>%
+  inner_join(movies, by = 'MovieID') %>%
+  filter(ratings_per_movie > 2000) %>%
+  filter(grepl(desired_genre, Genres, fixed = TRUE)) %>%
+  arrange(desc(ratings_per_movie)) %>%
+  top_n(10, ratings_per_movie) %>%
+  mutate(Image = paste0('<img src="', 
+                        small_image_url, 
+                        MovieID, 
+                        '.jpg?raw=true"></img>')) %>%
+  select('Image', 'Title', 'ratings_per_movie', 'Genres') %>%
+  datatable(class = "nowrap hover row-border", escape = FALSE, 
+            options = list(dom = 't',scrollX = TRUE, autoWidth = TRUE))
+```
+
+### Proposed Recommendation Scheme Based on Genre II
+
+Definition: The top ten highly-rated (based on their average ratings) among all movies that have received at least 1000 ratings.
+
+Note: Genre is hard-coded to `Comedy`. However, in our Movie Recommender App, the user is allowed to pick his desired genre. Shown below is a list of recommendations for `Comedy` genre.
+
+```{r}
+ratings %>% 
+  group_by(MovieID) %>% 
+  summarize(ratings_per_movie = n(), 
+            ave_ratings = round(mean(Rating), dig=3)) %>%
+  inner_join(movies, by = 'MovieID') %>%
+  filter(ratings_per_movie > 1000) %>%
+  filter(grepl(desired_genre, Genres, fixed = TRUE)) %>%
+  top_n(10, ave_ratings) %>%
+  mutate(Image = paste0('<img src="', 
+                        small_image_url, 
+                        MovieID, 
+                        '.jpg?raw=true"></img>')) %>%
+  select('Image', 'Title', 'ave_ratings', 'Genres') %>%
+  arrange(desc(ave_ratings)) %>%
+  datatable(class = "nowrap hover row-border", 
+            escape = FALSE, 
+            options = list(dom = 't',
+                          scrollX = TRUE, autoWidth = TRUE))
+```
+
+We decided to use the second proposed model/scheme for our shinyApp. The predictions for some genres based on the definition of the second scheme contain less than 10 movies or no movies at all. For example, `Documentary` genre based on the definition of the second scheme will produce no recommendations. Other genres like `musical`, `Film-Noir`, and `Mystery` will prodcue less than 10 recommendations. Most of the remaining genres have at least 10 recommendations or more per genre. In our Movie Recommender App, we displayed all movies recommended for each genre regardless of the count of movies recommended by the definition of the second proposed scheme.
+
+
+## System II
+
+### Proposed Collaborative Recommendation System I (UBCF)
+
+User-Based Collaborative Filtering is a technique used to predict the items that a user might like on the basis of ratings given to that item by the other users who have similar taste with that of the target user.
+
+`evaluationScheme` function is used along with the following parameters:
+
+* `Method = split` : used to split the dataset into train and test datasets.
+
+* `train = 0.8` : used to specify the size of the train dataset (in this case, train dataset is 80\% of the whole dataset while the test dataset is around 20\% of the original dataset).
+
+* `given = 10`: During testing, the `given` protocol presents the algorithm with only x (in this case x = 10) randomly chosen items for the test user, and the algorithm is evaluated by how well it is able to predict the withheld items.
+
+After splitting the data, we train the model using the following parameters:
+
+* `method = UBCF`: which indicates that a user-based collaborative filtering is used.
+
+* parameter `normalize = Z-score`: Normalization is used to remove individual rating bias by users who consistently always use lower or higher ratings than other users. A popular method is to center the rows of the user-item rating matrix by subtracting the mean of all available ratings in a row of the user-item matrix. Z-score in addition divides by the standard deviation of the row. 
+
+* parameter `method = Cosine`: indicates that we use Cosine similarity measure to calculate similarity among different users.
+
+* parameter `nn=25`: indicates the neighbourhood size which refers to the top 25 similar users to our current user.
+
+For UBCF, there is essentially no training. Computation is needed at the prediction stage when new data is provided. The key computation cost is the similarity between new users and users of training dataset over M items, as well as the corresponding process for finding the top nearest neighbours.
+
+The following code is used to construct the UBCF model using parameters explained above, and retrieve Root Mean Square Error (RMSE) which is the metric we use to evaluate our model. 
+
+```{r, eval=FALSE}
+  set.seed(1707)
+  train = ratings
+  i = paste0('u', train$UserID)
+  j = paste0('m', train$MovieID)
+  x = train$Rating
+  tmp = data.frame(i, j, x, stringsAsFactors = T)
+  Rmat = sparseMatrix(as.integer(tmp$i), as.integer(tmp$j), x = tmp$x)
+  rownames(Rmat) = levels(tmp$i)
+  colnames(Rmat) = levels(tmp$j)
+  Rmat = new('realRatingMatrix', data = Rmat)
+  
+  eval_scheme = evaluationScheme(Rmat, method="split", train = 0.8, given = 10)
+  
+  rec_UBCF = Recommender(getData(eval_scheme, "train"), method = "UBCF",
+                         parameter = list(normalize = 'Z-score', 
+                                   method = 'Cosine', 
+                                   nn = 25))
+  rec_UBCF@model
+  recom_UBCF = predict(rec_UBCF, 
+                getData(eval_scheme, "known"), type = 'ratings')
+  #rec_list_UBCF = as(recom_UBCF, 'list')
+  
+  errorMeasures_UBCF = calcPredictionAccuracy(recom_UBCF, getData(eval_scheme, "unknown"))
+  # retrieve RMSE
+  errorMeasures_UBCF[1]
+```
+
+### Proposed Collaborative Recommendation System II (IBCF)
+
+Item-item collaborative filtering is a form of collaborative filtering for recommender systems based on the similarity between items calculated using people's ratings of those items.
+
+* Similar to training scheme used for UBCF, we split the orginal dataset into train dataset (80\% of the original dataset) and test dataset (20\% of the original dataset).
+
+* We also used 10 randomly chosen items (`given = 10`) for each test user so that we can evaluate the algorithm based on those 10 witheld items.
+
+* In training the IBCF model, we used `Z-score` normalization technique (explained earlier) along with the `Cosine` similarity measure to measure the similarity between each pair of items.
+
+* The neighbourhood size is `k = 30` which refers to the top 30 similar items to our current item.
+
+For IBCF, the main computation occurs in the training, which is the computation of the item-to-item M-by-M similarity matrix as well as the corresponding sorting. This also presents a memory challenge, since the large rating matrix may not even be able to be loaded into memory. For IBCF, once the item-to-item similarity matrix is computed, prediction involves just efficient matrix products.
+
+The following code is used to construct the IBCF model using parameters explained above, and retrieve Root Mean Square Error(RMSE) which is the metric we use to evaluate our model. 
+
+```{r, eval=FALSE}
+  set.seed(1707)
+  train = ratings
+  i = paste0('u', train$UserID)
+  j = paste0('m', train$MovieID)
+  x = train$Rating
+  tmp = data.frame(i, j, x, stringsAsFactors = T)
+  Rmat = sparseMatrix(as.integer(tmp$i), as.integer(tmp$j), x = tmp$x)
+  rownames(Rmat) = levels(tmp$i)
+  colnames(Rmat) = levels(tmp$j)
+  Rmat = new('realRatingMatrix', data = Rmat)
+  
+  eval_scheme = evaluationScheme(Rmat, method="split", train = 0.8, given=10)
+  
+  rec_IBCF = Recommender(getData(eval_scheme, "train"), method = "IBCF",
+                         parameter = list(normalize = 'Z-score', 
+                                   method = 'Cosine', 
+                                   k = 30))
+  rec_IBCF@model
+  recom_IBCF = predict(rec_IBCF, 
+                getData(eval_scheme, "known"), type = 'ratings')
+  #rec_list_IBCF = as(recom_IBCF, 'list')
+  
+  errorMeasures_IBCF = calcPredictionAccuracy(recom_IBCF, getData(eval_scheme, "unknown"))
+  # retrieve RMSE
+  errorMeasures_IBCF[1]
+```
+
+## System II Cross-validation using 10 train/test splits
+
+For each of the 10 splits, Create
+
+* **train** data that contain about 80\% rows of `ratings.dat` 
+
+* **test** data that contain about 20\% of rows of `ratings.dat`
+
+Then, we evaluate the two constructed models (UBCF and IBCF) across 10 different training/test split using RMSE evaluation metric. The resulting RMSE values for the two models across the 10 splits are shown below.
+
+```{r}
+set.seed(1707)
+n_iter = 10
+RMSE_UBCF = rep(0, n_iter)
+RMSE_IBCF = rep(0, n_iter)
+
+for(z in 1:n_iter){
+  train = ratings
+  i = paste0('u', train$UserID)
+  j = paste0('m', train$MovieID)
+  x = train$Rating
+  tmp = data.frame(i, j, x, stringsAsFactors = T)
+  Rmat = sparseMatrix(as.integer(tmp$i), as.integer(tmp$j), x = tmp$x)
+  rownames(Rmat) = levels(tmp$i)
+  colnames(Rmat) = levels(tmp$j)
+  Rmat = new('realRatingMatrix', data = Rmat)
+  
+  eval_scheme = evaluationScheme(Rmat, method="split", train = 0.8, given=10)
+  
+  rec_UBCF = Recommender(getData(eval_scheme, "train"), method = 'UBCF',
+                  parameter = list(normalize = 'Z-score', 
+                                   method = 'Cosine', 
+                                   nn = 25))
+  rec_IBCF = Recommender(getData(eval_scheme, "train"), method = 'IBCF',
+                  parameter = list(normalize = 'Z-score', 
+                                   method = 'Cosine', 
+                                   k = 30))
+  #Summary of model parameters
+  #rec_UBCF@model
+  #rec_IBCF@model
+  
+  # This may take a long time
+  recom_UBCF = predict(rec_UBCF, 
+                getData(eval_scheme, "known"), type = 'ratings')
+  recom_IBCF = predict(rec_IBCF,
+                       getData(eval_scheme, "known"), type = 'ratings')
+  
+  recom_UBCF = predict(rec_UBCF, 
+                getData(eval_scheme, "known"), type = 'ratings')
+  
+  recom_IBCF = predict(rec_IBCF, 
+                getData(eval_scheme, "known"), type = 'ratings')
+  
+  errorMeasures_UBCF = calcPredictionAccuracy(recom_UBCF, getData(eval_scheme, "unknown"))
+  RMSE_UBCF[z] = errorMeasures_UBCF[1]
+  #print(RMSE_UBCF[z])
+  
+  errorMeasures_IBCF = calcPredictionAccuracy(recom_IBCF, getData(eval_scheme, "unknown"))
+  RMSE_IBCF[z] = errorMeasures_IBCF[1]
+  #print(RMSE_IBCF[z])
+} 
+```
+
+```{r}
+df_RMSE = data.frame(Iteration = seq(1, 10, 1), UBCF = RMSE_UBCF, IBCF = RMSE_IBCF)
+knitr::kable(df_RMSE, caption = "RMSE metric of 10 train/test splits for UBCF and IBCF models")
+```
+
+
+As we can see from the above table, UBCF performs better in this case than IBCF model. We picked UBCF to be the model we use for our shinyApp.
+
+The specifications of the system used to train/test our two models are: Windows 10 Pro 64-bit, Intel Core i9-9880H CPU (2.30 GHz), 32.0GB RAM. The training and testing of the two models for 10 train/test splits took approximately two hours.
+
+In our Movie Recommender shinyApp, if the user does not rate any movies, the recommendations displayed by System II will be pre-specified list of movies. The user will also be shown a warning message to rate some of the movies to get personalized recommendations using UBCF algorithm.
+
+
+
+
+
